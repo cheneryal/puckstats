@@ -42,6 +42,7 @@ POLL_INTERVAL_SECONDS = 0.2 # Adjusted for GUI responsiveness
 RECHECK_WINDOW_INTERVAL_SECONDS = 15
 DEBUG_ENABLED = False
 DEBUG_CANVAS_WIDTH = 800
+USE_GPU_IF_AVAILABLE = False # Set to False to force CPU usage for EasyOCR. Reduces EXE size with CPU-only PyTorch.
 
 ROI_ADJUSTMENT_STEP = 5 # Pixels to adjust ROI by for each button press
 AUTO_DETECT_PERIOD_ROI = True # Enable/disable automatic ROI detection
@@ -806,7 +807,7 @@ def main():
     # --- Initialize EasyOCR Reader ---
     try:
         print("Loading EasyOCR model...")
-        use_gpu = torch.cuda.is_available()
+        use_gpu = USE_GPU_IF_AVAILABLE and torch.cuda.is_available()
         easyocr_reader = easyocr.Reader(['en'], gpu=use_gpu, model_storage_directory=EASYOCR_MODEL_DIR)
         print(f"EasyOCR model loaded. Using GPU: {use_gpu}")
     except Exception as e:
