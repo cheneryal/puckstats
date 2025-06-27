@@ -1,7 +1,6 @@
 opencv-python
 numpy
 mss
-easyocr
-PyGetWindow
-torch
+pygetwindow
+pytesseract
 Pillow
