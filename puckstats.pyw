@@ -1,12 +1,10 @@
 import cv2
 import numpy as np
 import mss
-# import easyocr # Moved to main() to handle ModuleNotFoundError and packaging issues
 import time
 import re
 import os
 import pygetwindow as gw
-# import torch # Moved to main() to handle ModuleNotFoundError and packaging issues
 import traceback
 import json
 import winreg
