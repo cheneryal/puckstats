@@ -1,6 +1,11 @@
+easyocr
+torch
+torchvision
+scikit-image
+PyYAML
 opencv-python
-numpy
+Pillow
 mss
 pygetwindow
-pytesseract
-Pillow
+pywin32
+numpy
