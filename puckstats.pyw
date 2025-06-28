@@ -1,12 +1,12 @@
 import cv2
 import numpy as np
 import mss
-import easyocr
+# import easyocr # Moved to main() to handle ModuleNotFoundError and packaging issues
 import time
 import re
 import os
 import pygetwindow as gw
-import torch
+# import torch # Moved to main() to handle ModuleNotFoundError and packaging issues
 import traceback
 import json
 import winreg
@@ -22,6 +22,7 @@ CONFIG_FILE = "config.json"
 GAME_WINDOW_TITLE = "Puck"
 
 # Region of Interest (ROI) Coordinates (RELATIVE to game window)
+# This will be updated by the manual selection tool.
 ROI_TIME_REL = {'top': 15, 'left': 1160, 'width': 273, 'height': 87}
 ROI_PERIOD_REL = {'top': 120, 'left': 1118, 'width': 330, 'height': 78}
 
@@ -45,18 +46,6 @@ DEBUG_CANVAS_WIDTH = 800
 USE_GPU_IF_AVAILABLE = False # Set to False to force CPU usage for EasyOCR. Reduces EXE size with CPU-only PyTorch.
 
 ROI_ADJUSTMENT_STEP = 5 # Pixels to adjust ROI by for each button press
-AUTO_DETECT_PERIOD_ROI = True # Enable/disable automatic ROI detection
-ROI_AUTO_DETECT_KEYWORDS = ["GOAL", "WARMUP", "FACE OFF", "PERIOD", "INTERMISSION", "OVERTIME", "SHOOTOUT"]
-# Heuristics for auto-detected ROI
-ROI_AUTO_DETECT_MIN_WIDTH = 50
-ROI_AUTO_DETECT_MIN_HEIGHT = 20
-ROI_AUTO_DETECT_MAX_WIDTH_RATIO = 0.8 # Max width of ROI relative to game window width
-ROI_AUTO_DETECT_MAX_HEIGHT_RATIO = 0.3 # Max height of ROI relative to game window height
-ROI_AUTO_DETECT_PADDING = 5 # Pixels to add around the detected text bbox
-# Define a vertical band within the game window to search for keywords
-# Values are ratios of the game window's height.
-ROI_SEARCH_AREA_TOP_Y_RATIO = 0.0  # Start search from the top of the game window
-ROI_SEARCH_AREA_BOTTOM_Y_RATIO = 0.4 # End search at 40% of the game window's height from the top
 
 # PyInstaller: Tell EasyOCR to use a local model directory for packaging.
 EASYOCR_MODEL_DIR = "easyocr_models"
@@ -77,7 +66,6 @@ stats_text_widget = None
 gui_root = None
 roi_display_label = None
 debug_image_label = None
-period_roi_auto_calibrated = False
 
 # --- Helper Functions --- (debug_print, get_game_window_roi, preprocess_image_for_ocr)
 def debug_print(*args, **kwargs):
@@ -92,9 +80,9 @@ def get_game_window_roi(title):
         # active_window = gw.getActiveWindow() # Less reliable if window isn't focused
         possible_game_windows = []
         for i, w in enumerate(windows):
-             # Check title exactly AND ensure it's a plausible window (not minimized, reasonable size)
-             if w.title == title and not w.isMinimized and w.width > 100 and w.height > 100:
-                 possible_game_windows.append(w)
+              # Check title exactly AND ensure it's a plausible window (not minimized, reasonable size)
+              if w.title == title and not w.isMinimized and w.width > 100 and w.height > 100:
+                  possible_game_windows.append(w)
         if not possible_game_windows: return None
         # If multiple windows match, maybe take the largest? Or just the first.
         target_window = possible_game_windows[0] # Taking the first found
@@ -142,8 +130,8 @@ def ocr_region(sct, screen_roi, roi_content_type="general_text"):
         print("[ERROR] EasyOCR Reader not initialized!")
         return "", None, None
     if not screen_roi or screen_roi['width'] <= 0 or screen_roi['height'] <= 0:
-         debug_print(f"Invalid screen_roi for OCR: {screen_roi}")
-         return "", None, None
+          debug_print(f"Invalid screen_roi for OCR: {screen_roi}")
+          return "", None, None
 
     try:
         img_raw = sct.grab(screen_roi)
@@ -156,11 +144,11 @@ def ocr_region(sct, screen_roi, roi_content_type="general_text"):
             img_bgr = cv2.cvtColor(img_np, cv2.COLOR_BGRA2BGR)
         # Handle case where it might already be BGR (less likely with mss)
         elif len(img_np.shape) == 3 and img_np.shape[2] == 3:
-             img_bgr = img_np
+              img_bgr = img_np
         else:
-             # This case should ideally not happen with mss typical output
-             print(f"Warning: Unexpected image format from mss: {img_np.shape}")
-             raise ValueError(f"Unexpected raw image format: {img_np.shape}")
+              # This case should ideally not happen with mss typical output
+              print(f"Warning: Unexpected image format from mss: {img_np.shape}")
+              raise ValueError(f"Unexpected raw image format: {img_np.shape}")
 
         if img_bgr is None: raise ValueError("cvtColor failed")
 
@@ -173,8 +161,8 @@ def ocr_region(sct, screen_roi, roi_content_type="general_text"):
             ocr_params['allowlist'] = '0123456789:'
             debug_print("Using EasyOCR with allowlist for time digits.")
         elif roi_content_type == "period_or_goal":
-             ocr_params['allowlist'] = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 '
-             debug_print("Using EasyOCR with allowlist for period/goal text.")
+              ocr_params['allowlist'] = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 '
+              debug_print("Using EasyOCR with allowlist for period/goal text.")
 
         # --- Perform OCR with EasyOCR ---
         ocr_start_time = time.time()
@@ -191,8 +179,8 @@ def ocr_region(sct, screen_roi, roi_content_type="general_text"):
         debug_print(f"EasyOCR Raw Results: {results}")
 
     except mss.ScreenShotError as sse:
-         print(f"Error taking screenshot for ROI {screen_roi}: {sse}")
-         return "", None, None
+        print(f"Error taking screenshot for ROI {screen_roi}: {sse}")
+        return "", None, None
     except Exception as e:
         print(f"Error during EasyOCR processing for ROI {screen_roi} (Type: {roi_content_type}): {e}")
         # traceback.print_exc() # Uncomment for full stack trace if needed
@@ -249,7 +237,7 @@ def load_config():
         try:
             with open(CONFIG_FILE, 'r') as f:
                 config_data = json.load(f)
-            
+
             loaded_roi = config_data.get("ROI_PERIOD_REL")
             if loaded_roi and all(k in loaded_roi for k in ('top', 'left', 'width', 'height')):
                 ROI_PERIOD_REL = loaded_roi
@@ -297,7 +285,7 @@ def find_and_set_game_path():
                         break # Found it
             except FileNotFoundError:
                 continue
-        
+
         if steam_path:
             possible_textfiles_path = os.path.join(steam_path, "steamapps", "common", "Puck", "textfiles")
             if os.path.isdir(possible_textfiles_path):
@@ -315,7 +303,7 @@ def find_and_set_game_path():
         "Puck Folder Not Found",
         "Could not automatically find the 'Puck' game folder.\n\nPlease select your main 'Puck' game directory in the next window (e.g., C:\\...\\steamapps\\common\\Puck)."
     )
-    
+
     user_selected_path = filedialog.askdirectory(title="Select your 'Puck' game folder")
 
     if user_selected_path:
@@ -402,7 +390,7 @@ def parse_period_from_name(period_name_str):
             num = int(match_num.group(1))
             if 1 <= num <= 9: return num # Basic sanity check
         except ValueError: pass
-    
+
     debug_print(f"Period name parse failed for: '{period_name_str}'")
     return -1 # Return -1 if parsing fails
 
@@ -431,7 +419,7 @@ def copy_stats_to_clipboard():
         for item_id in stats_text_widget.get_children():
             values = stats_text_widget.item(item_id, "values")
             content_lines.append("\t".join(map(str, values)))
-        
+
         full_content = "\n".join(content_lines)
         gui_root.clipboard_clear()
         gui_root.clipboard_append(full_content)
@@ -473,19 +461,138 @@ def update_roi_display_label():
         roi_display_label.config(text=text)
 
 def adjust_period_roi(param, delta):
-    global ROI_PERIOD_REL, period_roi_auto_calibrated
+    global ROI_PERIOD_REL
     if param in ROI_PERIOD_REL:
         ROI_PERIOD_REL[param] += delta
         # Ensure width and height are not negative
         if param == 'width' and ROI_PERIOD_REL[param] < 10:
             ROI_PERIOD_REL[param] = 10 # Minimum width
         if param == 'height' and ROI_PERIOD_REL[param] < 10:
-            ROI_PERIOD_REL[param] = 10 # Minimum height 
+            ROI_PERIOD_REL[param] = 10 # Minimum height
 
-        period_roi_auto_calibrated = True
         print(f"Adjusted ROI: {param} by {delta}. New ROI_PERIOD_REL: {ROI_PERIOD_REL}")
         update_roi_display_label()
         save_config()
+
+def prompt_for_roi_with_snapshot():
+    """
+    Takes a snapshot of the game window and opens a new window
+    for the user to draw the ROI manually. The snapshot is resized if too large.
+    """
+    global ROI_PERIOD_REL, gui_root
+
+    MAX_SNAPSHOT_WIDTH = 1280
+    MAX_SNAPSHOT_HEIGHT = 720
+
+    # 1. Get game window and take a snapshot
+    print("Attempting to capture game window for manual ROI selection...")
+    current_game_roi = get_game_window_roi(GAME_WINDOW_TITLE)
+    if not current_game_roi:
+        messagebox.showerror("Error", f"Game window '{GAME_WINDOW_TITLE}' not found. Cannot set ROI.")
+        return
+
+    # Use mss to grab the window content
+    with mss.mss() as sct:
+        try:
+            screenshot_raw = sct.grab(current_game_roi)
+            screenshot_img = Image.frombytes("RGB", screenshot_raw.size, screenshot_raw.bgra, "raw", "BGRX")
+        except mss.ScreenShotError as e:
+            messagebox.showerror("Screenshot Failed", f"Could not capture the game window. Is it obstructed or minimized?\n\nError: {e}")
+            return
+
+    # 2. Resize the snapshot if it's too large
+    original_width, original_height = screenshot_img.size
+    scale = 1.0
+    if original_width > MAX_SNAPSHOT_WIDTH or original_height > MAX_SNAPSHOT_HEIGHT:
+        scale = min(MAX_SNAPSHOT_WIDTH / original_width, MAX_SNAPSHOT_HEIGHT / original_height)
+        new_width = int(original_width * scale)
+        new_height = int(original_height * scale)
+        screenshot_img = screenshot_img.resize((new_width, new_height), Image.Resampling.LANCZOS)
+        print(f"Snapshot resized from {original_width}x{original_height} to {new_width}x{new_height} (scale: {scale:.2f})")
+
+    # 3. Create the ROI selection Toplevel window
+    selector_window = tk.Toplevel(gui_root)
+    selector_window.title("Draw Period/Goal ROI")
+    selector_window.transient(gui_root)
+    selector_window.grab_set()
+
+    instruction_label = ttk.Label(selector_window, text="Click and drag to draw a rectangle over the Period/Goal text. Then click 'Confirm'.")
+    instruction_label.pack(pady=5)
+
+    canvas = tk.Canvas(selector_window, width=screenshot_img.width, height=screenshot_img.height, cursor="cross")
+    canvas.pack()
+    tk_photo = ImageTk.PhotoImage(screenshot_img)
+    canvas.create_image(0, 0, anchor=tk.NW, image=tk_photo)
+    canvas.image = tk_photo
+
+    rect_coords = {'x1': 0, 'y1': 0, 'x2': 0, 'y2': 0}
+    rect_id = None
+
+    def on_press(event):
+        nonlocal rect_id
+        rect_coords['x1'] = event.x
+        rect_coords['y1'] = event.y
+        if rect_id:
+            canvas.delete(rect_id)
+
+    def on_motion(event):
+        nonlocal rect_id
+        rect_coords['x2'] = event.x
+        rect_coords['y2'] = event.y
+        if rect_id:
+            canvas.delete(rect_id)
+        rect_id = canvas.create_rectangle(rect_coords['x1'], rect_coords['y1'], rect_coords['x2'], rect_coords['y2'], outline='red', width=2)
+
+    def on_confirm():
+        nonlocal rect_coords
+        # Scale the coordinates from the resized image back to the original image size
+        scaled_left = min(rect_coords['x1'], rect_coords['x2'])
+        scaled_top = min(rect_coords['y1'], rect_coords['y2'])
+        scaled_width = abs(rect_coords['x2'] - rect_coords['x1'])
+        scaled_height = abs(rect_coords['y2'] - rect_coords['y1'])
+
+        if scaled_width > 5 and scaled_height > 5:
+            # Convert back to original coordinates
+            original_left = int(scaled_left / scale)
+            original_top = int(scaled_top / scale)
+            original_width_val = int(scaled_width / scale)
+            original_height_val = int(scaled_height / scale)
+
+            ROI_PERIOD_REL['left'] = original_left
+            ROI_PERIOD_REL['top'] = original_top
+            ROI_PERIOD_REL['width'] = original_width_val
+            ROI_PERIOD_REL['height'] = original_height_val
+
+            print(f"Manually set new ROI: {ROI_PERIOD_REL}")
+            update_roi_display_label()
+            save_config()
+            selector_window.destroy()
+        else:
+            messagebox.showwarning("Invalid ROI", "The selected area is too small. Please try drawing a larger rectangle.", parent=selector_window)
+
+    canvas.bind("<ButtonPress-1>", on_press)
+    canvas.bind("<B1-Motion>", on_motion)
+
+    button_frame = ttk.Frame(selector_window)
+    button_frame.pack(fill=tk.X, pady=5, padx=5)
+
+    confirm_btn = ttk.Button(button_frame, text="Confirm ROI", command=on_confirm)
+    confirm_btn.pack(side=tk.LEFT, expand=True, fill=tk.X, padx=(0,2))
+
+    cancel_btn = ttk.Button(button_frame, text="Cancel", command=selector_window.destroy)
+    cancel_btn.pack(side=tk.RIGHT, expand=True, fill=tk.X, padx=(2,0))
+
+    selector_window.update_idletasks()
+    main_x = gui_root.winfo_x()
+    main_y = gui_root.winfo_y()
+    main_w = gui_root.winfo_width()
+    main_h = gui_root.winfo_height()
+    sel_w = selector_window.winfo_width()
+    sel_h = selector_window.winfo_height()
+    x = main_x + (main_w // 2) - (sel_w // 2)
+    y = main_y + (main_h // 2) - (sel_h // 2)
+    selector_window.geometry(f'+{x}+{y}')
+    selector_window.wait_window()
 
 def setup_gui():
     global gui_root, stats_text_widget, roi_display_label, debug_image_label
@@ -506,7 +613,7 @@ def setup_gui():
     stats_table_frame.pack(fill=tk.BOTH, expand=True, side=tk.TOP, pady=(0,10))
 
     stats_text_widget = ttk.Treeview(stats_table_frame, columns=columns, show="headings", selectmode="extended")
-    
+
     stats_text_widget.heading("period", text="Period")
     stats_text_widget.heading("time", text="Time")
     stats_text_widget.heading("team", text="Team")
@@ -522,7 +629,7 @@ def setup_gui():
     # Scrollbar for Treeview
     scrollbar = ttk.Scrollbar(stats_table_frame, orient=tk.VERTICAL, command=stats_text_widget.yview)
     stats_text_widget.configure(yscrollcommand=scrollbar.set)
-    
+
     stats_text_widget.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
     scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
 
@@ -570,11 +677,11 @@ def setup_gui():
 
     save_button = ttk.Button(button_frame, text="Save to File", command=save_stats_to_file)
     save_button.pack(side=tk.LEFT, padx=(5, 0), expand=True, fill=tk.X)
-    
-    # Add a button to re-trigger auto-detection
-    re_detect_button = ttk.Button(button_frame, text="Re-Detect ROI", command=trigger_roi_auto_detection)
-    re_detect_button.pack(side=tk.LEFT, padx=(5,0), expand=True, fill=tk.X)
-    
+
+    # --- Button to set ROI manually ---
+    set_roi_button = ttk.Button(button_frame, text="Set Period ROI Manually", command=prompt_for_roi_with_snapshot)
+    set_roi_button.pack(side=tk.LEFT, padx=(5,0), expand=True, fill=tk.X)
+
     # Make the GUI non-blocking for the main loop
     gui_root.protocol("WM_DELETE_WINDOW", on_closing_gui) # Handle GUI close
 
@@ -583,7 +690,7 @@ def on_closing_gui():
     if messagebox.askokcancel("Quit", "Do you want to quit the Stat Logger?"):
         if gui_root:
             gui_root.quit()
-            gui_root.destroy() 
+            gui_root.destroy()
 
         print("GUI closed by user. Exiting script.")
         os._exit(0)
@@ -591,10 +698,10 @@ def on_closing_gui():
 # --- create_debug_canvas function ---
 def create_debug_canvas(images_dict, canvas_width=800):
     global ROI_PERIOD_REL # Access the global ROI for display
-    
+
     period_data = images_dict.get('Period', (None, None, "Period ROI Not Captured"))
     raw_img, processed_img, ocr_text = period_data
-    
+
     display_img = None
     img_h, img_w = 0, 0
 
@@ -606,7 +713,7 @@ def create_debug_canvas(images_dict, canvas_width=800):
                 display_img = raw_img
             elif len(raw_img.shape) == 2: # Grayscale
                 display_img = cv2.cvtColor(raw_img, cv2.COLOR_GRAY2BGR)
-            
+
             if display_img is not None:
                 img_h, img_w = display_img.shape[:2]
         except Exception as e:
@@ -614,7 +721,7 @@ def create_debug_canvas(images_dict, canvas_width=800):
             display_img = None # Fallback
 
     # Define max display size for the image in the debug window
-    max_debug_img_w = 300 
+    max_debug_img_w = 300
     max_debug_img_h = 150
     scaled_display_img = None
 
@@ -625,7 +732,7 @@ def create_debug_canvas(images_dict, canvas_width=800):
             img_h, img_w = scaled_display_img.shape[:2] # Update to scaled dimensions
         else: # Should not happen if img_w, img_h > 0
             scaled_display_img = display_img # Use original if scaling fails
-    
+
     # If no image, use placeholder dimensions for text
     if scaled_display_img is None:
         img_h, img_w = max_debug_img_h, max_debug_img_w
@@ -664,135 +771,39 @@ def create_debug_canvas(images_dict, canvas_width=800):
             y_text_offset += 18 # Move to next line
         else:
             break
-            
+
     return canvas
-
-# --- Automatic ROI Detection Function ---
-def find_period_roi_automatically(sct_instance, game_window_abs_coords):
-    global ROI_PERIOD_REL, easyocr_reader, game_window_roi
-    if not easyocr_reader or not game_window_abs_coords:
-        print("[AutoROI] OCR reader or game window not ready.")
-        return False
-
-    print("[AutoROI] Attempting to automatically detect Period ROI...")
-    try:
-        # 1. Capture the entire game window
-        game_window_img_raw = sct_instance.grab(game_window_abs_coords)
-        game_window_img_np = np.array(game_window_img_raw)
-
-        if game_window_img_np is None or game_window_img_np.size == 0:
-            print("[AutoROI] Failed to grab game window image.")
-            return False
-
-        game_window_bgr = cv2.cvtColor(game_window_img_np, cv2.COLOR_BGRA2BGR)
-
-        # 2. Perform OCR on the whole game window image
-        ocr_results = easyocr_reader.readtext(game_window_bgr, detail=1, paragraph=False, batch_size=4) 
-
-        candidate_rois = []
-
-        # Define the search area within the game window in absolute pixel coordinates
-        search_area_top_abs = game_window_abs_coords['height'] * ROI_SEARCH_AREA_TOP_Y_RATIO
-        search_area_bottom_abs = game_window_abs_coords['height'] * ROI_SEARCH_AREA_BOTTOM_Y_RATIO
-
-        for (bbox_coords, text, confidence) in ocr_results:
-            text_upper = text.upper().strip()
-            debug_print(f"[AutoROI] OCR Found: '{text_upper}' with conf {confidence:.2f} at {bbox_coords}")
-
-            # Reject text that is likely from the logger GUI to avoid self-detection
-            if "ROI" in text_upper or "LOGGER" in text_upper:
-                debug_print(f"[AutoROI] Rejecting '{text_upper}' as it appears to be from the logger GUI.")
-                continue
-
-            # Extract bounding box top and bottom y-coordinates (relative to game window capture)
-            y_coords_text = [int(p[1]) for p in bbox_coords]
-            text_top_y = min(y_coords_text)
-            text_bottom_y = max(y_coords_text)
-
-            # Check if the detected text is within the defined vertical search band
-            if not (search_area_top_abs <= text_top_y < search_area_bottom_abs and \
-                    search_area_top_abs < text_bottom_y <= search_area_bottom_abs):
-                debug_print(f"[AutoROI] Rejecting '{text_upper}' due to being outside vertical search band ({search_area_top_abs}-{search_area_bottom_abs}, text_y: {text_top_y}-{text_bottom_y}).")
-                continue
-
-            for keyword in ROI_AUTO_DETECT_KEYWORDS:
-                if keyword in text_upper:
-                    # Extract bounding box
-                    (tl, tr, br, bl) = bbox_coords
-                    x_coords = [int(p[0]) for p in bbox_coords]
-                    y_coords = [int(p[1]) for p in bbox_coords]
-                    
-                    abs_left = min(x_coords)
-                    abs_top = min(y_coords)
-                    abs_right = max(x_coords)
-                    abs_bottom = max(y_coords)
-
-                    width = abs_right - abs_left
-                    height = abs_bottom - abs_top
-
-                    # Apply heuristics
-                    if width < ROI_AUTO_DETECT_MIN_WIDTH or height < ROI_AUTO_DETECT_MIN_HEIGHT:
-                        debug_print(f"[AutoROI] Rejecting '{text_upper}' due to small size: W={width}, H={height}")
-                        continue
-                    if width > game_window_abs_coords['width'] * ROI_AUTO_DETECT_MAX_WIDTH_RATIO or \
-                       height > game_window_abs_coords['height'] * ROI_AUTO_DETECT_MAX_HEIGHT_RATIO:
-                        debug_print(f"[AutoROI] Rejecting '{text_upper}' due to large size relative to window.")
-                        continue
-                    
-                    rel_top = max(0, abs_top - ROI_AUTO_DETECT_PADDING)
-                    rel_left = max(0, abs_left - ROI_AUTO_DETECT_PADDING)
-                    rel_width = min(game_window_abs_coords['width'] - rel_left, width + 2 * ROI_AUTO_DETECT_PADDING)
-                    rel_height = min(game_window_abs_coords['height'] - rel_top, height + 2 * ROI_AUTO_DETECT_PADDING)
-
-                    score = confidence
-                    if keyword == "GOAL": score += 0.2
-                    if keyword == "WARMUP": score += 0.1
-                    if keyword == "FACE OFF": score += 0.1
-                    
-                    candidate_rois.append({
-                        'top': rel_top, 'left': rel_left, 
-                        'width': rel_width, 'height': rel_height,
-                        'text': text_upper, 'keyword': keyword, 'score': score
-                    })
-                    debug_print(f"[AutoROI] Candidate: {text_upper} -> ROI: T:{rel_top} L:{rel_left} W:{rel_width} H:{rel_height} Score: {score}")
-                    break # Found a keyword in this text block
-
-        if not candidate_rois:
-            print("[AutoROI] No suitable keywords found for ROI detection.")
-            return False
-
-        best_candidate = max(candidate_rois, key=lambda c: c['score'])
-        
-        ROI_PERIOD_REL['top'] = best_candidate['top']
-        ROI_PERIOD_REL['left'] = best_candidate['left']
-        ROI_PERIOD_REL['width'] = best_candidate['width']
-        ROI_PERIOD_REL['height'] = best_candidate['height']
-
-        print(f"[AutoROI] Successfully auto-detected Period ROI based on '{best_candidate['text']}' (Keyword: {best_candidate['keyword']}).")
-        print(f"[AutoROI] New ROI_PERIOD_REL: {ROI_PERIOD_REL}")
-        save_config()
-        return True
-
-    except Exception as e:
-        print(f"[AutoROI] Error during automatic ROI detection: {e}")
-        traceback.print_exc()
-        return False
-
-def trigger_roi_auto_detection():
-    global period_roi_auto_calibrated
-    print("Manual ROI auto-detection triggered.")
-    period_roi_auto_calibrated = False
 
 # --- Main Loop ---
 def main():
     global last_known_good_period, last_time_seconds, last_known_good_period_name
     global easyocr_reader, game_window_roi
     global last_window_check_time, last_period_roi_state, last_logged_stat_for_debug
-    global gui_root, logged_stats, period_roi_auto_calibrated # Added GUI globals
+    global gui_root, logged_stats
+
+    # Initialize GUI first to show potential errors
+    setup_gui()
+
+    # --- Delayed Imports & Error Handling ---
+    try:
+        import easyocr
+        import torch
+    except ModuleNotFoundError as e:
+        error_msg = (
+            f"A required module was not found: {e.name}\n\n"
+            "This can happen when running the compiled .exe if the module was not included by PyInstaller.\n\n"
+            "Please ensure you have installed the required packages, especially 'easyocr' and its dependencies ('torch', etc.), in your environment before compiling.\n\n"
+            "The application will now close."
+        )
+        print(f"[FATAL] {error_msg}")
+        messagebox.showerror("Fatal Error: Missing Module", error_msg)
+        if gui_root:
+            gui_root.destroy()
+        return
 
     print("Initializing Stat Logger (using EasyOCR)...")
     load_config() # Load config at startup
-    setup_gui() # Initialize Tkinter GUI
+    update_roi_display_label() # Update GUI with loaded ROI
 
     # --- Find Game Path ---
     if not find_and_set_game_path():
@@ -806,6 +817,23 @@ def main():
 
     # --- Initialize EasyOCR Reader ---
     try:
+        # Check for GPU-enabled PyTorch and warn user about EXE size
+        if torch.cuda.is_available():
+            if not USE_GPU_IF_AVAILABLE:
+                messagebox.showwarning(
+                    "Performance & Size Warning",
+                    "A GPU-enabled version of PyTorch was detected, but GPU usage is disabled in the script (USE_GPU_IF_AVAILABLE = False).\n\n"
+                    "The compiled .exe will be very large. For a smaller file size, please uninstall PyTorch and reinstall the CPU-only version before compiling:\n\n"
+                    "pip uninstall torch torchvision torchaudio\n"
+                    "pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu"
+                )
+            else: # GPU is available and we intend to use it
+                messagebox.showinfo(
+                    "GPU Detected",
+                    "A GPU-enabled version of PyTorch was detected and will be used.\n\n"
+                    "Note: This will result in a very large compiled .exe file."
+                )
+
         print("Loading EasyOCR model...")
         use_gpu = USE_GPU_IF_AVAILABLE and torch.cuda.is_available()
         easyocr_reader = easyocr.Reader(['en'], gpu=use_gpu, model_storage_directory=EASYOCR_MODEL_DIR)
@@ -832,55 +860,35 @@ def main():
             if gui_root is None or not tk._default_root: # Check if GUI was closed
                 print("GUI window closed or not available. Exiting main loop.")
                 break
-            
+
             debug_print(f"\n--- Loop Start {loop_count} ---", flush=True)
             debug_images = {}
-    
+
             try:
                 current_time_ms = time.time()
 
                 # --- Find/Update Game Window ROI ---
-                game_window_just_found = False
                 if game_window_roi is None or (current_time_ms - last_window_check_time > RECHECK_WINDOW_INTERVAL_SECONDS):
-                   found_roi = get_game_window_roi(GAME_WINDOW_TITLE)
-                   last_window_check_time = current_time_ms
-                   if found_roi:
-                       if game_window_roi != found_roi: # Window found or changed
-                           debug_print(f"Game window '{GAME_WINDOW_TITLE}' found/updated at: {found_roi}", flush=True)
-                           game_window_roi = found_roi
-                           game_window_just_found = True # Mark that window was just (re)acquired
-                           # period_roi_auto_calibrated = False # Reset if window moves/resizes significantly
-                       elif game_window_roi is None: # First time finding the window
-                           game_window_roi = found_roi
-                           game_window_just_found = True
+                    found_roi = get_game_window_roi(GAME_WINDOW_TITLE)
+                    last_window_check_time = current_time_ms
+                    if found_roi:
+                        if game_window_roi != found_roi: # Window found or changed
+                            debug_print(f"Game window '{GAME_WINDOW_TITLE}' found/updated at: {found_roi}", flush=True)
+                            game_window_roi = found_roi
+                        elif game_window_roi is None: # First time finding the window
+                            game_window_roi = found_roi
 
-
-                   else: # Window not found
-                       if game_window_roi is not None: 
-                           print(f"Game window '{GAME_WINDOW_TITLE}' lost. Searching...", flush=True)
-                           game_window_roi = None
-                           period_roi_auto_calibrated = False # Reset if window lost
-                       debug_print("[Debug] Window not found this check.", flush=True)
-                       time.sleep(1.0) 
-                       continue 
+                    else: # Window not found
+                        if game_window_roi is not None:
+                            print(f"Game window '{GAME_WINDOW_TITLE}' lost. Searching...", flush=True)
+                            game_window_roi = None
+                        debug_print("[Debug] Window not found this check.", flush=True)
+                        time.sleep(1.0)
+                        continue
 
                 if game_window_roi is None:
                     time.sleep(POLL_INTERVAL_SECONDS)
                     continue
-                
-                # --- Automatic Period ROI Detection ---
-                if AUTO_DETECT_PERIOD_ROI and not period_roi_auto_calibrated and game_window_roi:
-                    # Pass the absolute coordinates of the game window to the detection function
-                    if find_period_roi_automatically(sct, game_window_roi):
-                        period_roi_auto_calibrated = True
-                        update_roi_display_label() # Update GUI with new auto-detected ROI
-                    else:
-                        print("[MainLoop] Automatic Period ROI detection failed. Using current/default or manual settings.")
-                        # period_roi_auto_calibrated = True # Mark as attempted to avoid constant retries if it always fails
-                                                       # Or leave false to retry next time window is checked.
-                        # For now, let's mark as attempted if it fails, user can click re-detect.
-                        if not game_window_just_found : # if it wasn't just found, and it failed, mark as tried.
-                             period_roi_auto_calibrated = True
 
 
                 # --- Calculate ROIs ---
@@ -889,9 +897,9 @@ def main():
 
                 # Check if ROIs are valid before OCRing
                 if not time_abs_roi or not period_abs_roi:
-                     print("[WARN] One or more absolute ROIs could not be calculated. Skipping OCR this cycle.")
-                     time.sleep(POLL_INTERVAL_SECONDS)
-                     continue
+                      print("[WARN] One or more absolute ROIs could not be calculated. Skipping OCR this cycle.")
+                      time.sleep(POLL_INTERVAL_SECONDS)
+                      continue
 
                 # --- OCR Regions ---
                 time_str, time_img_raw, time_img_ocr = ocr_region(sct, time_abs_roi, "time_digits")
@@ -900,7 +908,7 @@ def main():
                 # --- Determine Current State of Period ROI (Primarily for "GOAL" detection) ---
                 current_period_roi_state = "OTHER"
                 if "GOAL" in period_roi_text_raw.upper().replace(" ", ""):
-                     current_period_roi_state = "GOAL"
+                      current_period_roi_state = "GOAL"
                 debug_print(f"Period ROI OCR Text: '{period_roi_text_raw}', Detected State: {current_period_roi_state}")
 
 
@@ -928,15 +936,15 @@ def main():
                     else:
                         debug_print(f"Period name from file changed to '{current_period_name_from_file}', but could not parse to a known period number. Keeping period number {last_known_good_period}.")
                     last_known_good_period_name = current_period_name_from_file
-                
+
                 current_display_period = last_known_good_period
 
                 # --- Goal Scored Check ---
                 goal_just_appeared = (current_period_roi_state == "GOAL" and last_period_roi_state != "GOAL")
-                
+
                 if goal_just_appeared: # No ANNOUNCE_GOALS check, always log if detected
                     print("Goal trigger detected ('GOAL' appeared). Logging stat...")
-                    
+
                     # --- Read Goal Information from Text Files ---
                     goal_team = read_game_text_file(GOAL_TEAM_FILE)
                     scorer_name = read_game_text_file(GOAL_SCORER_FILE)
@@ -947,7 +955,7 @@ def main():
                     goal_time_clock = goal_time_clock_raw
                     if goal_time_clock_raw and goal_time_clock_raw.startswith('0') and len(goal_time_clock_raw) > 1 and goal_time_clock_raw[1].isdigit():
                         goal_time_clock = goal_time_clock_raw[1:]
-                    
+
                     debug_print(f"Goal Info from Files: Team='{goal_team}', Scorer='{scorer_name}', Assist1='{assister1_name}', Assist2='{assister2_name}', Clock='{goal_time_clock}' (Raw: '{goal_time_clock_raw}'), PeriodFile='{current_period_name_from_file}'")
 
                     if scorer_name:
@@ -956,14 +964,14 @@ def main():
                         time_for_log = goal_time_clock if goal_time_clock else "Unknown Time"
 
                         team_for_log = goal_team.capitalize() if goal_team else "N/A"
-                        
+
                         # Assisters
                         assisters_list = []
                         if assister1_name: assisters_list.append(assister1_name)
                         if assister2_name and assister2_name != assister1_name: assisters_list.append(assister2_name)
 
                         assist_str_log = ", ".join(assisters_list) if assisters_list else "Unassisted"
-                        
+
                         # Tuple format for Treeview
                         logged_stat_tuple = (
                             period_for_log,
@@ -982,7 +990,7 @@ def main():
                         else:
                             debug_print(f"Duplicate goal event detected. Ignoring: {logged_stat_tuple}")
                             last_logged_stat_for_debug = "Duplicate goal ignored"
-                        
+
                     else:
                         debug_print("Goal triggered, but no scorer name found in text files. Not logging.")
                         last_logged_stat_for_debug = "Goal detected (No scorer in file)"
@@ -993,8 +1001,8 @@ def main():
 
                 # Clear last logged stat for debug if not in goal state
                 if current_period_roi_state != "GOAL" and not goal_just_appeared:
-                     if loop_count % 50 == 0: # Periodically clear if no recent goal, to avoid stale display
-                        last_logged_stat_for_debug = ""
+                      if loop_count % 50 == 0: # Periodically clear if no recent goal, to avoid stale display
+                          last_logged_stat_for_debug = ""
 
 
                 # Update last time if valid time was read
@@ -1055,7 +1063,7 @@ def main():
 
     # --- Cleanup ---
     print("Cleaning up...")
-    
+
     if gui_root:
         try:
             gui_root.destroy()
