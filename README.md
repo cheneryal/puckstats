@@ -1,6 +1,6 @@
 # puckstats
 
-1. Download the [Puck Stats App](https://github.com/cheneryal/puckstats/releases/download/v1.0/Puck.Stats.exe)
+1. Download the [Puck Stats App](https://github.com/cheneryal/puckstats/releases/download/v2.0/Puck.Stats.exe)
 2. Run Puck Stats.exe
 3. Install and Enable Toaster's Rink Companion
 4. Verify that the file path detected for the textfiles folder is correct
