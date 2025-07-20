@@ -1,26 +1,34 @@
 # -*- mode: python ; coding: utf-8 -*-
 
+# Add any other large libraries you know you are not using.
+# 'torch.testing' has been removed from this list to fix the "Missing Module" error.
+aggressive_excludes = [
+    'PyQt5', 'pandas', 'matplotlib', 
+    'wandb', 'datasets', 'triton',
+    'tensorboard', 'IPython', 'jupyter_client', 'jupyter_core', 'notebook'
+]
 
 a = Analysis(
     ['puckstats.pyw'],
     pathex=[],
     binaries=[],
-    datas=[('easyocr_models', 'easyocr_models')],
+    datas=[('icon.ico', '.')],
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=['PyQt5', 'pandas', 'matplotlib'],
+    excludes=aggressive_excludes,
     noarchive=False,
     optimize=0,
 )
 pyz = PYZ(a.pure)
 
+# --- One-File Executable Configuration ---
 exe = EXE(
     pyz,
     a.scripts,
-    [],
-    exclude_binaries=True,
+    a.binaries,
+    a.datas,
     name='Puck Stats',
     debug=False,
     bootloader_ignore_signals=False,
@@ -32,14 +40,7 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon=['icon.ico'],
+    icon='icon.ico',
 )
-coll = COLLECT(
-    exe,
-    a.binaries,
-    a.datas,
-    strip=False,
-    upx=True,
-    upx_exclude=[],
-    name='Puck Stats',
-)
+
+# The COLLECT block is removed for a one-file build.
